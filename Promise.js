@@ -45,7 +45,6 @@ constructor( executor ){
     }
 
     if( this.status == PENDING ){
-      //TODO 
       this.onRejectedCallbacks.push(()=> onRejected( this.reason ) )
       this.onFulfilledCallbacks.push(()=> onFulfilled( this.value ) )
     }
