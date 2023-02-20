@@ -4,7 +4,43 @@ const FULFILLED = 'FULFILLED'
 const REJECTED = 'REJECTED'
 
 function resolvePromise(promise2, x, resolve, reject) {
-  if (x == promise2) return new TypeError('一样')
+  if (x == promise2) return new TypeError('循环引用');
+  let then, called;
+
+  if (x != null && ((typeof x == 'object' || typeof x == 'function'))) {
+    try {
+      then = x.then;
+      // 判断是否是 promise 
+      if (typeof then == 'function') {
+        then.call(x, function (y) {
+          if (called) return;
+          called = true;
+          // 可能有深度 Promise
+          /**
+           * new Promise((resolve,reject)=>{
+           *  resolve(new Promise((resolve)=>{
+           *      resolve(1000)
+           * }))
+           * })
+           */
+          resolvePromise(promise2, y, resolve, reject);
+        }, function (r) {
+          // 防止失败之后再次调用，其实没啥用
+          if (called) return;
+          called = true;
+          reject(r);
+        });
+      } else {
+        resolve(x);
+      }
+    } catch (e) {
+      if (called) return;
+      called = true;
+      reject(e);
+    }
+  } else {
+    resolve(x);
+  }
 }
 
 
@@ -41,6 +77,12 @@ class Promise {
   }
   // 由于需要切换状态，所以需要返回一个新的Promise
   then(onFulfilled, onRejected) {
+    // 值的穿透
+    // Promise.resolve(1).then().then().then(10)
+    // 相当于 Promise.resolve(1).then(r=>{return r}).then(r=>{ return r})
+    onFulfilled ??= v => v;
+    // 相当于 Promise.reject(1).then(_,e=>throw e).then(_,e=>throw e)
+    onRejected ??= v => { throw v };
     let promise2 = new Promise((resolve, reject) => {
 
       if (this.status == FULFILLED) {
@@ -49,7 +91,7 @@ class Promise {
           let x = onFulfilled(this.value)
           // resolve 是一个函数 是fulfilled
           // 但是 Promise 是同步的，获取不到 Promise2
-          // 所以使用 异步
+          // 所以使用 异步,要判断是否 promise 和 x 的关系
           setTimeout(() => {
             resolvePromise(promise2, x, resolve, reject)
           })
