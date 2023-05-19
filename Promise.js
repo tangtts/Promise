@@ -1,55 +1,171 @@
+const PENGING = "pending";
+const FULFILLED = "fulfilled";
+const REJECTED = "rejected";
 
-const PENDING = 'PENDING'
-const FULFILLED = 'FULFILLED'
-const REJECTED = 'REJECTED'
-class Promise {
-
-constructor( executor ){
-    this.value = undefined;
-    this.reason = undefined;
-    this.status  = PENDING;
-
-    this.onFulfilledCallbacks = []
-    this.onRejectedCallbacks = []
-
-    const fulfilled =  ( value ) => {
-      if( this.status == PENDING ){
-        this.value = value
-        this.status = FULFILLED
-        this.onFulfilledCallbacks.forEach(fn => fn())
-      }
-    }
-
-    const rejected =  ( reason ) => {
-      if( this.status == PENDING ){
-        this.reason = reason
-        this.status = REJECTED
-        this.onRejectedCallbacks.forEach(fn => fn())
-      }
-    }
-
+function resolvePromise(promise2, x, resolve, reject) {
+  if (x == promise2) return new TypeError("循环引用");
+  let then, called;
+  //  2.3.3 x 是函数或者对象
+  if (x != null && (typeof x == "object" || typeof x == "function")) {
+    // 2.3.3.2 异常直接reject
     try {
-      executor(fulfilled,rejected)
-    }catch (e){
-      rejected(e)
-    }
-  }
-  then(onFulfilled,onRejected){
+      // 2.3.3.1 then 为 x.then
+      then = x.then;
 
-    if( this.status == FULFILLED ){
-      onFulfilled( this.value )
+      // 2.3.3.3 判断函数
+      if (typeof then == "function") {
+        // 2.3.3.3 x 作为 this
+        // 相当于 x.then(function(y){},function(r){})
+        then.call(
+          x,
+          function (y) {
+            // 2.3.3.3.4.1 已经调用过，直接忽略掉
+            if (called) return;
+            called = true;
+            // 2.3.3.3.1 如果是 resolve，则继续往下判断是否是 promise
+            resolvePromise(promise2, y, resolve, reject);
+          },
+          function (r) {
+            // 2.3.3.3.4.1 已经调用过，直接忽略掉
+            if (called) return;
+            called = true;
+            // 2.3.3.3.2 如果是 reject ，直接停止判断
+            reject(r);
+          }
+        );
+      } else {
+        // 不是函数，只是一个普通对象
+        resolve(x);
+      }
+    } catch (e) {
+      // 2.3.3.2 异常直接reject
+      if (called) return;
+      called = true;
+      reject(e);
     }
-
-    if( this.status == REJECTED){
-      onRejected( this.reason )
-    }
-
-    if( this.status == PENDING ){
-      this.onRejectedCallbacks.push(()=> onRejected( this.reason ) )
-      this.onFulfilledCallbacks.push(()=> onFulfilled( this.value ) )
-    }
-
+  } else {
+    // 普通值直接返回
+    resolve(x);
   }
 }
 
-module.exports = Promise
+class Promise {
+  constructor(executor) {
+    //
+    this.value = undefined;
+    this.reason = undefined;
+    this.status = PENGING;
+
+    this.onFulfilledCallbacks = [];
+    this.onRejectedCallbacks = [];
+
+    const onFulfilled = val => {
+      if (this.status == PENGING) {
+        if (val instanceof Promise) {
+          return val.then(onFulfilled, onRejected);
+        }
+
+        this.value = val;
+        this.status = FULFILLED;
+        this.onFulfilledCallbacks.forEach(fn => fn());
+      }
+    };
+    const onRejected = reason => {
+      if (this.status == PENGING) {
+        this.reason = reason;
+        this.status = REJECTED;
+        this.onRejectedCallbacks.forEach(fn => fn());
+      }
+    };
+
+    // 默认执行一次
+    executor(onFulfilled, onRejected);
+  }
+  then(onFulfilled, onRejected) {
+    let promise2 = new Promise((resolve, reject) => {
+      if (this.status == FULFILLED) {
+        try {
+          let x = onFulfilled(this.value);
+          setTimeout(() => {
+            resolvePromise(promise2, x, resolve, reject);
+          });
+        } catch (err) {
+          reject(err);
+        }
+      }
+      if (this.status == REJECTED) {
+        try {
+          let x = onRejected(this.reason);
+          resolvePromise(promise2, x, resolve, reject);
+        } catch (err) {
+          reject(err);
+        }
+      }
+      if (this.status == PENGING) {
+        this.onFulfilledCallbacks.push(() => {
+          try {
+            let x = onFulfilled(this.value);
+            resolvePromise(promise2, x, resolve, reject);
+          } catch (err) {
+            reject(err);
+          }
+        });
+        this.onRejectedCallbacks.push(() => {
+          try {
+            let x = onRejected(this.reason);
+            resolvePromise(promise2, x, resolve, reject);
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    });
+    return promise2;
+  }
+  catch(callback) {
+    this.then(null, callback);
+  }
+  static resolve(val) {
+    return new Promise((resolve, rejcet) => {
+      resolve(val);
+    });
+  }
+  static reject(err) {
+    return new Promise((resolve, rejcet) => {
+      rejcet(err);
+    });
+  }
+  static all(arr) {
+    return new Promise((resolve, rejcet) => {
+      let len = arr.length,
+        ret = [];
+      arr.forEach((val, idx) => {
+        Promise.resolve(val).then(res => {
+          ret[idx] = res;
+          if (--len == 0) {
+            resolve(ret);
+          }
+        }, rejcet);
+      });
+    });
+  }
+  static race(arr) {
+    return new Promise((resolve, reject) => {
+      arr.forEach(val => {
+        Promise.resolve(val).then(resolve, reject);
+      });
+    });
+  }
+  finally(callback) {
+    // value
+    return this.then(
+      value => this.resolve(callback()).then(() => value),
+      reason =>
+        this.resolve(callback()).then(() => {
+          throw reason;
+        })
+    );
+  }
+}
+
+module.exports = Promise;

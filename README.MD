@@ -1,10 +1,11 @@
 #  写一个 <font color="red"> Promise </font>
 
+[掘金](https://juejin.cn/post/7234447275861344293)
 要实现的功能
  - [x]  同步调用
  - [x]  异步调用
  - [x]  then 链
-
+ - [ ] 有趣
 ```mermaid
 graph TD;
  判断1[/是否是Promise/]
